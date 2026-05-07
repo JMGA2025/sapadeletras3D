@@ -3,7 +3,6 @@
   <head>
     <meta charset="utf-8">
     <title>Soldadura 3D - Aula Ateca</title>
-    <!-- Cargamos A-Frame para la experiencia 3D/XR -->
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <style>
       body { margin: 0; overflow: hidden; background-color: transparent; }
@@ -11,88 +10,66 @@
   </head>
   <body>
     <script>
-      // 1. CONFIGURACIÓN DE DATOS Y ESTADO GLOBAL
       const TERMINOS = ["ZAT", "SAN", "DC-", "DC+", "E7016", "E6013", "BASICO", "RUTILO", "SMAW", "111", "AC", "WPS"];
       let seleccion = "";
       let seleccionados = [];
       let totalEncontrados = 0;
 
-      // 2. LÓGICA DEL JUEGO COMPACTO
       AFRAME.registerComponent('game-logic', {
         init: function () {
           const sceneEl = this.el;
           let pool = [];
           
-          // Generar pool de letras de los términos técnicos
           TERMINOS.forEach(t => t.split('').forEach(l => pool.push(l)));
-          
-          // Relleno aleatorio para camuflar
           const alphabet = "ABCDEFGHIJKLMNOP1234567890";
           for(let i=0; i<30; i++) pool.push(alphabet[Math.floor(Math.random()*alphabet.length)]);
 
-          // Crear entidades en un espacio de 2x2m compacto
           pool.forEach((char) => {
             const entity = document.createElement('a-entity');
             
-            // Posicionamiento en una nube compacta frente al usuario (aprox 2m de radio)
+            // Espacio compacto: 2m ancho, 1.2m alto, 2m profundidad
             const x = (Math.random() - 0.5) * 2; 
             const y = (Math.random() * 1.2) + 0.8; 
             const z = - (Math.random() * 1.5 + 0.5); 
 
             entity.setAttribute('position', {x: x, y: y, z: z});
+            
+            // La geometría debe estar en la entidad que recibe el click
+            entity.setAttribute('geometry', {primitive: 'cylinder', radius: 0.12, height: 0.04});
+            entity.setAttribute('rotation', '90 0 0');
+            entity.setAttribute('material', {color: '#2c3e50', metalness: 0.7, roughness: 0.2});
             entity.setAttribute('class', 'interactuable');
 
-            // Disco Azul Industrial con volumen
-            const disc = document.createElement('a-cylinder');
-            disc.setAttribute('rotation', '90 0 0');
-            disc.setAttribute('radius', '0.12');
-            disc.setAttribute('height', '0.03');
-            disc.setAttribute('material', {
-              color: '#2c3e50',
-              metalness: 0.7,
-              roughness: 0.2
-            });
-
-            // Texto Blanco con la letra/número
             const text = document.createElement('a-text');
             text.setAttribute('value', char);
             text.setAttribute('align', 'center');
             text.setAttribute('width', '3');
-            text.setAttribute('position', '0 0 0.02');
+            // Ajuste de posición para que el texto no se hunda en el cilindro
+            text.setAttribute('position', '0 0.03 0'); 
+            text.setAttribute('rotation', '-90 0 0');
             text.setAttribute('color', '#FFFFFF');
-            text.setAttribute('font', 'exo2bold');
 
-            entity.appendChild(disc);
             entity.appendChild(text);
 
-            // Gestión de selección táctil o láser
-            entity.addEventListener('click', () => {
-              const currentMaterial = disc.getAttribute('material');
-              if (currentMaterial.color === '#27ae60') return; // Palabra ya completada
+            entity.addEventListener('click', function() {
+              if (this.getAttribute('material').color === '#27ae60') return;
 
-              if (disc.getAttribute('material').color === '#f1c40f') {
-                // Deseleccionar si se toca de nuevo
-                disc.setAttribute('material', 'color', '#2c3e50');
-                const idx = seleccionados.indexOf(entity);
+              if (this.getAttribute('material').color === '#f1c40f') {
+                this.setAttribute('material', 'color', '#2c3e50');
+                const idx = seleccionados.indexOf(this);
                 if (idx > -1) seleccionados.splice(idx, 1);
-                seleccion = seleccionados.map(o => o.querySelector('a-text').getAttribute('value')).join('');
               } else {
-                // Seleccionar (Amarillo)
-                disc.setAttribute('material', 'color', '#f1c40f');
-                seleccionados.push(entity);
-                seleccion += char;
+                this.setAttribute('material', 'color', '#f1c40f');
+                seleccionados.push(this);
               }
 
-              // Actualizar panel visual
+              seleccion = seleccionados.map(o => o.querySelector('a-text').getAttribute('value')).join('');
               document.getElementById('pizarra-text').setAttribute('value', 'FORMANDO: ' + seleccion);
               
-              // Comprobar si se ha formado un término válido
               if (TERMINOS.includes(seleccion)) {
-                seleccionados.forEach(o => o.querySelector('a-cylinder').setAttribute('material', 'color', '#27ae60'));
+                seleccionados.forEach(o => o.setAttribute('material', 'color', '#27ae60'));
                 totalEncontrados++;
                 document.getElementById('contador').setAttribute('value', 'ENCONTRADOS: ' + totalEncontrados + ' / 12');
-                
-                // Resetear buffer de selección para la siguiente palabra
                 seleccion = "";
                 seleccionados = [];
                 setTimeout(() => {
@@ -107,40 +84,40 @@
       });
     </script>
 
-    <!-- Escena configurada para Realidad Mixta / Passthrough en Quest 3 -->
     <a-scene 
       game-logic
       renderer="alpha: true; antialias: true; colorManagement: true;"
-      webxr="optionalFeatures: hit-test, local-floor; referenceSpaceType: local-floor">
+      webxr="optionalFeatures: hit-test, local-floor, passthrough;">
       
-      <!-- Cielo oculto para permitir transparencia en AR -->
       <a-sky visible="false"></a-sky>
 
-      <!-- Iluminación del entorno -->
       <a-light type="ambient" intensity="0.8"></a-light>
       <a-light type="directional" position="1 2 1" intensity="0.5"></a-light>
 
-      <!-- Sistema de Cámara y Controles XR -->
       <a-entity id="rig">
         <a-camera position="0 1.6 0">
-          <!-- Cursor central para selección con la mirada (Fallback) -->
-          <a-cursor raycaster="objects: .interactuable" color="#2ecc71" opacity="0.5"></a-cursor>
+          <!-- Cursor para selección con la mirada (Fallback) -->
+          <a-cursor raycaster="objects: .interactuable" color="#2ecc71"></a-cursor>
         </a-camera>
-        <!-- Controles Láser para mandos de Meta Quest -->
+
+        <!-- MANDOS: Laser para Meta Quest -->
         <a-entity laser-controls="hand: left" raycaster="objects: .interactuable; far: 10"></a-entity>
         <a-entity laser-controls="hand: right" raycaster="objects: .interactuable; far: 10"></a-entity>
+
+        <!-- MANOS: Seguimiento de manos para Meta Quest 3 -->
+        <a-entity hand-tracking-controls="hand: left" raycaster="objects: .interactuable; far: 2" cursor></a-entity>
+        <a-entity hand-tracking-controls="hand: right" raycaster="objects: .interactuable; far: 2" cursor></a-entity>
       </a-entity>
 
-      <!-- Panel de Pizarra Digital (Flotante) -->
-      <a-entity position="0 2.3 -1.8">
-        <a-plane color="#1a1a1a" width="2.8" height="0.8" opacity="0.9"></a-plane>
-        <a-text id="pizarra-text" value="FORMANDO: ..." align="center" position="0 0.15 0.05" width="4" color="#f1c40f"></a-text>
-        <a-text id="contador" value="ENCONTRADOS: 0 / 12" align="center" position="0 -0.2 0.05" width="3" color="#ecf0f1"></a-text>
+      <!-- Panel de Control (Pizarra) -->
+      <a-entity position="0 2.4 -1.8">
+        <a-plane color="#1a1a1a" width="2.5" height="0.7" opacity="0.9"></a-plane>
+        <a-text id="pizarra-text" value="FORMANDO: ..." align="center" position="0 0.1 0.05" width="3.5" color="#f1c40f"></a-text>
+        <a-text id="contador" value="ENCONTRADOS: 0 / 12" align="center" position="0 -0.15 0.05" width="2.5" color="#ecf0f1"></a-text>
       </a-entity>
 
-      <!-- Botón de Reinicio rápido en el suelo -->
-      <a-entity position="1 0.1 -1" onclick="location.reload()" class="interactuable">
-        <a-box color="#c0392b" width="0.4" height="0.1" depth="0.2" material="metalness: 0.6"></a-box>
+      <!-- Botón Reiniciar -->
+      <a-entity position="1 0.1 -1" onclick="location.reload()" class="interactuable" geometry="primitive: box; width: 0.4; height: 0.1; depth: 0.2" material="color: #c0392b">
         <a-text value="REINICIAR" align="center" position="0 0.08 0" rotation="-90 0 0" width="2.5"></a-text>
       </a-entity>
 
