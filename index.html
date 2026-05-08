@@ -60,12 +60,60 @@
           this.livesText = document.querySelector('#lives-text');
           this.progressBar = document.querySelector('#progress-bar-fill');
           this.startBtn = document.querySelector('#start-btn');
-          this.saberBlades = document.querySelectorAll('.saber-blade');
           
-          // EVENTOS DE INICIO CORREGIDOS (Directos al botón)
-          const startHandler = () => { if (!gameActive) this.startGame(); };
-          this.startBtn.addEventListener('click', startHandler);
-          this.startBtn.addEventListener('raycaster-intersected', startHandler);
+          // Variables matemáticas para colisiones reales de espada
+          this.saberStart = new THREE.Vector3();
+          this.saberEnd = new THREE.Vector3();
+          this.targetPos = new THREE.Vector3();
+          this.saberLine = new THREE.Line3();
+          this.closestPoint = new THREE.Vector3();
+          
+          // Iniciar partida con el botón
+          this.startBtn.addEventListener('click', () => { if (!gameActive) this.startGame(); });
+        },
+
+        // TICK FUNCIONA COMO MOTOR DE FÍSICAS (Se ejecuta en cada frame)
+        tick: function () {
+            if (!gameActive) return;
+
+            const sabers = document.querySelectorAll('.saber-controller');
+            const targets = document.querySelectorAll('.target-item');
+            
+            if (sabers.length === 0 || targets.length === 0) return;
+
+            targets.forEach(target => {
+                if (target.dataset.hit === "true") return;
+                
+                // Posición central del disco
+                target.object3D.getWorldPosition(this.targetPos);
+                
+                sabers.forEach(saber => {
+                    if (target.dataset.hit === "true") return;
+
+                    const obj = saber.object3D;
+                    
+                    // Calculamos la base y la punta de la espada física
+                    this.saberStart.set(0, 0, 0); 
+                    obj.localToWorld(this.saberStart);
+                    
+                    // La espada mide 1.3 metros hacia adelante
+                    this.saberEnd.set(0, 0, -1.3); 
+                    obj.localToWorld(this.saberEnd);
+                    
+                    // Creamos un segmento de línea exacto donde está la espada
+                    this.saberLine.set(this.saberStart, this.saberEnd);
+                    
+                    // Encontramos el punto de la espada que esté más cerca del disco
+                    this.saberLine.closestPointToPoint(this.targetPos, true, this.closestPoint);
+                    const dist = this.closestPoint.distanceTo(this.targetPos);
+                    
+                    // Si ese punto atraviesa el radio del disco (0.36) + un margen, cortamos!
+                    if (dist < 0.40) { 
+                        target.dataset.hit = "true";
+                        this.handleHit(target, this.closestPoint.clone());
+                    }
+                });
+            });
         },
 
         startGame: function() {
@@ -97,7 +145,7 @@
 
         spawnTargets: function() {
           const isCorrectLeft = Math.random() > 0.5;
-          // Reducida la separación lateral un 20% (de 1.3 a 1.04)
+          // Separación ajustada para el tamaño reducido
           this.createTarget(currentChallenge.a, isCorrectLeft ? -1.04 : 1.04, true);
           this.createTarget(currentChallenge.bad, isCorrectLeft ? 1.04 : -1.04, false);
         },
@@ -108,25 +156,24 @@
           target.setAttribute('position', `${xPos} 1.3 -22`);
           target.dataset.correct = isCorrect;
           
-          // EVENTOS DE CORTE CORREGIDOS: Escuchamos directamente en el objeto
-          const hitHandler = (evt) => {
-            if (!gameActive || !target.parentNode) return;
-            const hitPoint = (evt.detail && evt.detail.intersection) ? evt.detail.intersection.point : null;
-            this.handleHit(target, hitPoint);
-          };
-          target.addEventListener('raycaster-intersected', hitHandler);
-          target.addEventListener('click', hitHandler); // Fallback para ratón
+          // Evento fallback para poder hacer "Click" con el ratón si se prueba en PC
+          target.addEventListener('click', () => {
+              if (gameActive && target.dataset.hit !== "true") {
+                  target.dataset.hit = "true";
+                  this.handleHit(target, target.getAttribute('position'));
+              }
+          });
           
           const body = document.createElement('a-cylinder');
           body.setAttribute('rotation', '90 0 0');
-          body.setAttribute('radius', '0.36'); // Reducido 20% (antes 0.45)
+          body.setAttribute('radius', '0.36'); // Reducido 20%
           body.setAttribute('height', '0.032'); // Reducido 20%
           body.setAttribute('material', 'color: #111111; metalness: 0.9; roughness: 0.1; emissive: #f1c40f; emissiveIntensity: 0.05');
           
           const text = document.createElement('a-text');
           text.setAttribute('value', label);
           text.setAttribute('align', 'center');
-          text.setAttribute('width', '4.4'); // Reducido 20% (antes 5.5)
+          text.setAttribute('width', '4.4'); // Reducido 20%
           text.setAttribute('position', '0 0 0.025');
           text.setAttribute('color', '#f1c40f');
           text.setAttribute('font', FONT_ESTABLE);
@@ -142,8 +189,9 @@
 
           this.el.appendChild(target);
 
+          // Si el disco pasa de largo y no se cortó...
           setTimeout(() => {
-            if (target.parentNode) {
+            if (target.parentNode && target.dataset.hit !== "true") {
               target.parentNode.removeChild(target);
               if (isCorrect && gameActive && this.pizarra.getAttribute('value') === currentChallenge.q) {
                 this.handleMiss();
@@ -155,6 +203,8 @@
         handleHit: function(targetEl, hitPoint) {
           const isCorrect = targetEl.dataset.correct === "true";
           const pos = targetEl.getAttribute('position');
+          
+          // Lanzar chispas en el punto de impacto exacto
           this.createSparks(hitPoint || pos);
 
           if (isCorrect) {
@@ -166,7 +216,8 @@
             this.pizarra.setAttribute('value', '¡CORRECTO!');
             this.pizarra.setAttribute('color', '#2ecc71');
             this.sliceEffect(pos);
-            targetEl.parentNode.removeChild(targetEl);
+            
+            if (targetEl.parentNode) targetEl.parentNode.removeChild(targetEl);
             this.cleanupTargets();
             
             if (questionsAnswered >= DESAFIOS.length) {
@@ -207,7 +258,7 @@
             lives--;
             combo = 0;
             this.checkEvents();
-            targetEl.setAttribute('material', 'color', '#c0392b');
+            targetEl.setAttribute('material', 'color: #c0392b');
             targetEl.setAttribute('animation__err', {property: 'scale', to: '0 0 0', dur: 200});
             this.pizarra.setAttribute('value', 'ERROR DE ANÁLISIS');
             this.pizarra.setAttribute('color', '#c0392b');
@@ -227,7 +278,6 @@
             this.startBtn.setAttribute('visible', 'true');
             this.startBtn.setAttribute('scale', '1 1 1');
             this.startBtn.querySelector('a-text').setAttribute('value', 'NUEVA PARTIDA');
-            this.startBtn.classList.add('interactuable');
         },
 
         gameOver: function() {
@@ -238,7 +288,6 @@
             this.startBtn.setAttribute('visible', 'true');
             this.startBtn.setAttribute('scale', '1 1 1');
             this.startBtn.querySelector('a-text').setAttribute('value', 'REINTENTAR');
-            this.startBtn.classList.add('interactuable');
         },
 
         increaseSpeed: function() {
@@ -256,8 +305,7 @@
         updateUI: function() {
             this.scoreText.setAttribute('value', `PUNTOS: ${score}`);
             this.comboText.setAttribute('value', `RACHA: ${combo}`);
-            
-            // CORRECCIÓN VIDAS: Texto clásico ya que las fuentes VR no soportan Emojis
+            // Solución para compatibilidad de fuentes (Texto normal en vez de Emojis)
             this.livesText.setAttribute('value', `VIDAS: ${lives} / 3`);
             this.livesText.setAttribute('color', lives === 1 ? '#ff0000' : '#FFFFFF');
             
@@ -290,13 +338,13 @@
             const half = document.createElement('a-cylinder');
             half.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
             half.setAttribute('rotation', '90 0 0');
-            half.setAttribute('radius', '0.36'); // Reducido 20%
+            half.setAttribute('radius', '0.36'); // Reducido
             half.setAttribute('height', '0.016');
             half.setAttribute('theta-length', '180');
             half.setAttribute('theta-start', side === 'left' ? '0' : '180');
             const color = questionsAnswered >= 13 ? '#ff00ff' : '#2ecc71';
             half.setAttribute('material', `color: #111111; emissive: ${color}; emissiveIntensity: 0.5`);
-            half.setAttribute('animation', { property: 'position', to: `${pos.x + (side === 'left' ? -2.5 : 2.5)} ${pos.y - 2.5} ${pos.z + 1.5}`, dur: 1200, easing: 'easeInQuad' });
+            half.setAttribute('animation', { property: 'position', to: `${pos.x + (side === 'left' ? -2.5 : 2.5)} ${pos.y - 2} ${pos.z + 1.5}`, dur: 1200, easing: 'easeInQuad' });
             half.setAttribute('animation__rot', { property: 'rotation', to: `${Math.random()*360} ${Math.random()*360} 0`, dur: 1200 });
             this.el.appendChild(half);
             setTimeout(() => { if(half.parentNode) half.parentNode.removeChild(half); }, 1250);
@@ -316,10 +364,10 @@
   <body>
     <a-scene 
       game-engine
-      renderer="alpha: true; antialias: true; colorManagement: true;"
+      renderer="alpha: true; antialias: true; colorManagement: true; highRefreshRate: true"
       webxr="optionalFeatures: hit-test, local-floor, passthrough;"
       cursor="rayOrigin: mouse"
-      raycaster="objects: .interactuable">
+      raycaster="objects: #start-btn, .target-item">
       
       <a-sky visible="false"></a-sky>
       <a-light type="ambient" intensity="0.9"></a-light>
@@ -330,27 +378,28 @@
       <a-entity id="rig">
         <a-camera position="0 1.6 0"><a-cursor visible="false"></a-cursor></a-camera>
         
-        <!-- SABLES REDUCIDOS 20% -->
-        <a-entity id="leftHand" laser-controls="hand: left" raycaster="objects: .target-item, #start-btn; far: 1.6; showLine: false; interval: 10">
-            <a-cylinder class="saber-blade" position="0 0 -0.6" rotation="90 0 0" radius="0.012" height="1.2" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 6"></a-cylinder>
-            <a-light type="point" color="#f1c40f" intensity="1.2" distance="3.2"></a-light>
-        </a-entity>
-        <a-entity id="rightHand" laser-controls="hand: right" raycaster="objects: .target-item, #start-btn; far: 1.6; showLine: false; interval: 10">
+        <!-- SABLES FISICOS - Añadimos class="saber-controller" y limitamos raycaster al botón -->
+        <a-entity id="leftHand" class="saber-controller" laser-controls="hand: left" raycaster="objects: #start-btn; far: 10; showLine: false; interval: 20">
             <a-cylinder class="saber-blade" position="0 0 -0.6" rotation="90 0 0" radius="0.012" height="1.2" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 6"></a-cylinder>
             <a-light type="point" color="#f1c40f" intensity="1.2" distance="3.2"></a-light>
         </a-entity>
         
-        <!-- HAND TRACKING REDUCIDO 20% -->
-        <a-entity hand-tracking-controls="hand: left" raycaster="objects: .target-item, #start-btn; far: 0.7; interval: 10">
+        <a-entity id="rightHand" class="saber-controller" laser-controls="hand: right" raycaster="objects: #start-btn; far: 10; showLine: false; interval: 20">
+            <a-cylinder class="saber-blade" position="0 0 -0.6" rotation="90 0 0" radius="0.012" height="1.2" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 6"></a-cylinder>
+            <a-light type="point" color="#f1c40f" intensity="1.2" distance="3.2"></a-light>
+        </a-entity>
+
+        <!-- TRACKING DE MANOS -->
+        <a-entity class="saber-controller" hand-tracking-controls="hand: left" raycaster="objects: #start-btn; far: 10; interval: 20">
              <a-cylinder class="saber-blade" position="0 0 -0.28" rotation="90 0 0" radius="0.008" height="0.56" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 4"></a-cylinder>
         </a-entity>
-        <a-entity hand-tracking-controls="hand: right" raycaster="objects: .target-item, #start-btn; far: 0.7; interval: 10">
+        <a-entity class="saber-controller" hand-tracking-controls="hand: right" raycaster="objects: #start-btn; far: 10; interval: 20">
              <a-cylinder class="saber-blade" position="0 0 -0.28" rotation="90 0 0" radius="0.008" height="0.56" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 4"></a-cylinder>
         </a-entity>
       </a-entity>
 
-      <!-- TERMINAL DE CONTROL REDUCIDO 20% Y REUBICADO -->
-      <a-entity position="0 2.2 -3.2" scale="0.8 0.8 0.8">
+      <!-- TERMINAL DE CONTROL (ALEJADO A -4.5 Y REDUCIDO AL 80%) -->
+      <a-entity position="0 2.2 -4.5" scale="0.8 0.8 0.8">
         <a-plane color="#000000" width="6.5" height="2.8" opacity="0.95" material="metalness: 0.5"></a-plane>
         <a-ring color="#f1c40f" radius-inner="3.3" radius-outer="3.4" position="0 0 -0.01" opacity="0.1"></a-ring>
         
@@ -361,15 +410,17 @@
             <a-plane id="progress-bar-fill" color="#2ecc71" width="0" height="0.1" position="-2.5 0 0.01" material="emissive: #2ecc71; emissiveIntensity: 0.5"></a-plane>
         </a-entity>
         
-        <a-text id="hint-text" value="CORTA PARA INICIAR" align="center" position="0 0.35 0.05" width="7" color="#2ecc71" font="dejavu"></a-text>
+        <a-text id="hint-text" value="APUNTA Y PULSA GATILLO" align="center" position="0 0.35 0.05" width="7" color="#2ecc71" font="dejavu"></a-text>
         
+        <!-- Texto claro de vidas -->
         <a-text id="lives-text" value="VIDAS: 3 / 3" align="center" position="0 -0.25 0.05" width="5.5" font="dejavu"></a-text>
         
         <a-text id="score-text" value="PUNTOS: 0" align="center" position="-1.8 -0.8 0.05" width="4.5" color="#f1c40f" font="dejavu"></a-text>
         <a-text id="combo-text" value="RACHA: 0" align="center" position="1.8 -0.8 0.05" width="4.5" color="#f1c40f" font="dejavu"></a-text>
 
+        <!-- BOTÓN DE INICIO PARA APUNTAR CON LÁSER -->
         <a-entity id="start-btn" position="0 -1.6 0.2" class="interactuable" geometry="primitive: plane; width: 2.8; height: 0.7" material="color: #27ae60; emissive: #27ae60; emissiveIntensity: 0.5">
-          <a-text value="CORTA PARA INICIAR" align="center" position="0 0 0.02" width="6.5" color="#FFFFFF" font="dejavu"></a-text>
+          <a-text value="PULSA GATILLO AQUI" align="center" position="0 0 0.02" width="6.5" color="#FFFFFF" font="dejavu"></a-text>
         </a-entity>
       </a-entity>
 
