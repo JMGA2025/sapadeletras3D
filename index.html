@@ -49,7 +49,6 @@
       const SPEED_STEP = 250;     
       let currentDuration = BASE_DURATION;
 
-      // Fuente nativa de A-Frame para asegurar acentos perfectos
       const FONT_ESTABLE = "dejavu";
 
       AFRAME.registerComponent('game-engine', {
@@ -59,9 +58,7 @@
           this.comboText = document.querySelector('#combo-text');
           this.livesText = document.querySelector('#lives-text');
           this.progressBar = document.querySelector('#progress-bar-fill');
-          this.saberBlades = document.querySelectorAll('.saber-blade');
           
-          // Variables matemáticas para colisiones físicas de la espada
           this.saberStart = new THREE.Vector3();
           this.saberEnd = new THREE.Vector3();
           this.targetPos = new THREE.Vector3();
@@ -69,28 +66,35 @@
           this.closestPoint = new THREE.Vector3();
           
           this.startTarget = null;
+          
+          // ESTADO DE SEGURIDAD (Evita que se procesen golpes dobles o superpuestos)
+          this.isTransitioning = false; 
+
           this.createStartTarget();
         },
 
-        // EL MOTOR DE COLISIONES FÍSICAS (Se ejecuta constantemente)
+        // MOTOR DE COLISIONES FÍSICAS (Revisado)
         tick: function () {
+            // Si el juego está bloqueado cargando la siguiente pregunta, ignoramos choques
+            if (this.isTransitioning) return; 
+
             const sabers = document.querySelectorAll('.saber-controller');
             if (sabers.length === 0) return;
 
-            // 1. Si el juego no ha empezado, comprobamos si cortamos el botón de inicio
+            // 1. Choques con el botón de inicio
             if (!gameActive) {
                 if (this.startTarget && this.startTarget.object3D) {
                     this.startTarget.object3D.getWorldPosition(this.targetPos);
                     
                     sabers.forEach(saber => {
-                        if (gameActive) return; // Evitar dobles activaciones
+                        if (gameActive) return;
                         const obj = saber.object3D;
                         this.saberStart.set(0, 0, 0); obj.localToWorld(this.saberStart);
-                        this.saberEnd.set(0, 0, -1.2); obj.localToWorld(this.saberEnd); // Largo del sable
+                        this.saberEnd.set(0, 0, -1.0); obj.localToWorld(this.saberEnd); // Espada de 1.0m
                         this.saberLine.set(this.saberStart, this.saberEnd);
                         this.saberLine.closestPointToPoint(this.targetPos, true, this.closestPoint);
                         
-                        if (this.closestPoint.distanceTo(this.targetPos) < 0.40) {
+                        if (this.closestPoint.distanceTo(this.targetPos) < 0.38) {
                             this.startGame();
                         }
                     });
@@ -98,7 +102,7 @@
                 return;
             }
 
-            // 2. Si el juego está activo, comprobamos los discos
+            // 2. Choques físicos reales con las preguntas
             const targets = document.querySelectorAll('.target-item');
             targets.forEach(target => {
                 if (target.dataset.hit === "true") return;
@@ -106,15 +110,16 @@
                 target.object3D.getWorldPosition(this.targetPos);
                 
                 sabers.forEach(saber => {
-                    if (target.dataset.hit === "true") return;
+                    if (target.dataset.hit === "true" || this.isTransitioning) return;
 
                     const obj = saber.object3D;
                     this.saberStart.set(0, 0, 0); obj.localToWorld(this.saberStart);
-                    this.saberEnd.set(0, 0, -1.2); obj.localToWorld(this.saberEnd);
+                    this.saberEnd.set(0, 0, -1.0); obj.localToWorld(this.saberEnd);
                     this.saberLine.set(this.saberStart, this.saberEnd);
                     this.saberLine.closestPointToPoint(this.targetPos, true, this.closestPoint);
                     
-                    if (this.closestPoint.distanceTo(this.targetPos) < 0.40) { 
+                    // Colisión ultraprecisa (Radio 0.36 + Margen)
+                    if (this.closestPoint.distanceTo(this.targetPos) < 0.38) { 
                         target.dataset.hit = "true";
                         this.handleHit(target, this.closestPoint.clone());
                     }
@@ -126,15 +131,14 @@
             if (this.startTarget) return;
             const target = document.createElement('a-entity');
             target.setAttribute('class', 'start-target'); 
-            target.setAttribute('position', '0 1.3 -1.5'); // Justo delante del alumno
+            target.setAttribute('position', '0 1.3 -1.5'); 
             
-            // Animación de flotación suave
             target.setAttribute('animation', {
                 property: 'position', to: '0 1.4 -1.5',
                 dir: 'alternate', loop: true, dur: 2000, easing: 'easeInOutSine'
             });
 
-            // Permitir clic con ratón para pruebas en PC
+            // Fallback sólo para PC (el raycaster de la cámara está limitado a este objeto)
             target.addEventListener('click', () => { if (!gameActive) this.startGame(); });
             
             const body = document.createElement('a-cylinder');
@@ -159,14 +163,15 @@
         },
 
         startGame: function() {
+          if (gameActive) return;
           gameActive = true;
+          this.isTransitioning = true; // Bloquea todo hasta que salga el primer disco
           
-          // Efecto visual al destruir el botón de inicio
           if (this.startTarget) {
               const pos = this.startTarget.getAttribute('position');
               this.sliceEffect(pos);
               this.createSparks(pos);
-              this.startTarget.parentNode.removeChild(this.startTarget);
+              if (this.startTarget.parentNode) this.startTarget.parentNode.removeChild(this.startTarget);
               this.startTarget = null;
           }
 
@@ -178,11 +183,15 @@
           this.updateUI();
           this.setSaberColor('#f1c40f', 5);
           
-          setTimeout(() => this.nextChallenge(), 1000);
+          setTimeout(() => {
+              this.isTransitioning = false;
+              this.nextChallenge();
+          }, 1000);
         },
 
         nextChallenge: function() {
           if (!gameActive) return;
+          
           let next;
           do {
             next = DESAFIOS[Math.floor(Math.random() * DESAFIOS.length)];
@@ -205,14 +214,6 @@
           target.setAttribute('class', 'target-item'); 
           target.setAttribute('position', `${xPos} 1.3 -22`);
           target.dataset.correct = isCorrect;
-          
-          // Fallback para PC
-          target.addEventListener('click', () => {
-              if (gameActive && target.dataset.hit !== "true") {
-                  target.dataset.hit = "true";
-                  this.handleHit(target, target.getAttribute('position'));
-              }
-          });
           
           const body = document.createElement('a-cylinder');
           body.setAttribute('rotation', '90 0 0');
@@ -239,17 +240,22 @@
 
           this.el.appendChild(target);
 
+          // Si el disco se pasa de largo (Fuera de tiempo)
           setTimeout(() => {
             if (target.parentNode && target.dataset.hit !== "true") {
-              target.parentNode.removeChild(target);
-              if (isCorrect && gameActive && this.pizarra.getAttribute('value') === currentChallenge.q) {
+              // Comprobamos que es la respuesta correcta y que el juego no ha transicionado ya
+              if (isCorrect && gameActive && !this.isTransitioning && this.pizarra.getAttribute('value') === currentChallenge.q) {
                 this.handleMiss();
               }
+              if (target.parentNode) target.parentNode.removeChild(target);
             }
           }, currentDuration + 100);
         },
 
         handleHit: function(targetEl, hitPoint) {
+          if (this.isTransitioning) return; // BLOQUEO: Previene impactos dobles de la espada
+          this.isTransitioning = true;
+          
           const isCorrect = targetEl.dataset.correct === "true";
           const pos = targetEl.getAttribute('position');
           
@@ -265,16 +271,35 @@
             this.pizarra.setAttribute('color', '#2ecc71');
             this.sliceEffect(pos);
             
-            if (targetEl.parentNode) targetEl.parentNode.removeChild(targetEl);
-            this.cleanupTargets();
+            this.cleanupTargets(); // Limpia toda la pantalla
             
             if (questionsAnswered >= DESAFIOS.length) {
                 this.victory();
             } else {
-                setTimeout(() => this.nextChallenge(), 800);
+                setTimeout(() => {
+                    this.isTransitioning = false;
+                    this.nextChallenge();
+                }, 800);
             }
           } else {
-            this.handleError(targetEl);
+            lives--;
+            combo = 0;
+            this.checkEvents();
+            targetEl.setAttribute('material', 'color: #c0392b');
+            targetEl.setAttribute('animation__err', {property: 'scale', to: '0 0 0', dur: 200});
+            this.pizarra.setAttribute('value', 'ERROR DE ANÁLISIS');
+            this.pizarra.setAttribute('color', '#c0392b');
+            
+            if (lives <= 0) { 
+                this.gameOver(); 
+            } else { 
+                this.cleanupTargets(targetEl); // Borra todo menos el que se está animando a rojo
+                setTimeout(() => {
+                    if (targetEl.parentNode) targetEl.parentNode.removeChild(targetEl);
+                    this.isTransitioning = false;
+                    this.nextChallenge();
+                }, 1500); 
+            }
           }
           this.updateUI();
         },
@@ -292,34 +317,30 @@
         },
 
         handleMiss: function() {
+            if (this.isTransitioning) return;
+            this.isTransitioning = true;
+
             lives--;
             combo = 0;
             this.checkEvents();
             this.pizarra.setAttribute('value', '¡FUERA DE TIEMPO!');
             this.pizarra.setAttribute('color', '#c0392b');
             this.updateUI();
-            if (lives <= 0) { this.gameOver(); }
-            else { setTimeout(() => this.nextChallenge(), 1500); }
-        },
 
-        handleError: function(targetEl) {
-            lives--;
-            combo = 0;
-            this.checkEvents();
-            targetEl.setAttribute('material', 'color: #c0392b');
-            targetEl.setAttribute('animation__err', {property: 'scale', to: '0 0 0', dur: 200});
-            this.pizarra.setAttribute('value', 'ERROR DE ANÁLISIS');
-            this.pizarra.setAttribute('color', '#c0392b');
-            this.updateUI();
-            if (lives <= 0) { this.gameOver(); }
-            else { 
+            if (lives <= 0) { 
+                this.gameOver(); 
+            } else { 
                 this.cleanupTargets();
-                setTimeout(() => this.nextChallenge(), 1500); 
+                setTimeout(() => {
+                    this.isTransitioning = false;
+                    this.nextChallenge();
+                }, 1500); 
             }
         },
 
         victory: function() {
             gameActive = false;
+            this.isTransitioning = false;
             this.cleanupTargets();
             this.pizarra.setAttribute('value', '¡MISIÓN CUMPLIDA - MAESTRO SMAW!');
             this.pizarra.setAttribute('color', '#2ecc71');
@@ -328,6 +349,7 @@
 
         gameOver: function() {
             gameActive = false;
+            this.isTransitioning = false;
             this.cleanupTargets();
             this.pizarra.setAttribute('value', 'FALLO CRÍTICO - SISTEMA COLAPSADO');
             this.pizarra.setAttribute('color', '#ff0000');
@@ -399,8 +421,11 @@
           createHalf('left'); createHalf('right');
         },
 
-        cleanupTargets: function() {
-          document.querySelectorAll('.target-item').forEach(t => { if (t.parentNode) t.parentNode.removeChild(t); });
+        // Permite excluir un elemento de la limpieza para que se pueda ver su animación de error
+        cleanupTargets: function(excludeEl = null) {
+          document.querySelectorAll('.target-item').forEach(t => { 
+              if (t !== excludeEl && t.parentNode) t.parentNode.removeChild(t); 
+          });
         }
       });
     </script>
@@ -422,18 +447,18 @@
 
       <a-entity id="rig">
         <a-camera position="0 1.6 0">
-            <!-- Cursor para pruebas en ordenador -->
-            <a-entity cursor="rayOrigin: mouse" raycaster="objects: .start-target, .target-item"></a-entity>
+            <!-- Raycaster limitado SÓLO al disco de inicio, las preguntas NO se cortan apuntando -->
+            <a-entity cursor="rayOrigin: mouse" raycaster="objects: .start-target"></a-entity>
         </a-camera>
         
-        <!-- SABLES FISICOS REALES (Sin raycaster) -->
+        <!-- SABLES FISICOS REALES (Longitud 1.0m) -->
         <a-entity id="leftHand" class="saber-controller" laser-controls="hand: left">
-            <a-cylinder class="saber-blade" position="0 0 -0.6" rotation="90 0 0" radius="0.012" height="1.2" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 6"></a-cylinder>
+            <a-cylinder class="saber-blade" position="0 0 -0.5" rotation="90 0 0" radius="0.012" height="1.0" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 6"></a-cylinder>
             <a-light type="point" color="#f1c40f" intensity="1.2" distance="3.2"></a-light>
         </a-entity>
         
         <a-entity id="rightHand" class="saber-controller" laser-controls="hand: right">
-            <a-cylinder class="saber-blade" position="0 0 -0.6" rotation="90 0 0" radius="0.012" height="1.2" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 6"></a-cylinder>
+            <a-cylinder class="saber-blade" position="0 0 -0.5" rotation="90 0 0" radius="0.012" height="1.0" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 6"></a-cylinder>
             <a-light type="point" color="#f1c40f" intensity="1.2" distance="3.2"></a-light>
         </a-entity>
 
@@ -446,8 +471,8 @@
         </a-entity>
       </a-entity>
 
-      <!-- TERMINAL DE CONTROL -->
-      <a-entity position="0 2.2 -4.5" scale="0.8 0.8 0.8">
+      <!-- TERMINAL DE CONTROL (ALEJADO A -5.0 METROS Y REDUCIDO AL 80%) -->
+      <a-entity position="0 2.2 -5.0" scale="0.8 0.8 0.8">
         <a-plane color="#000000" width="6.5" height="2.8" opacity="0.95" material="metalness: 0.5"></a-plane>
         <a-ring color="#f1c40f" radius-inner="3.3" radius-outer="3.4" position="0 0 -0.01" opacity="0.1"></a-ring>
         
