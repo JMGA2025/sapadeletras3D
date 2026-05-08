@@ -71,23 +71,41 @@
           this.createStartTarget();
         },
 
-        // MOTOR DE COLISIONES FÍSICAS BLINDADO
+        // MOTOR DE COLISIONES BLINDADO ANTI-CUELGUES
         tick: function () {
             if (this.isTransitioning) return; 
 
-            const sabers = document.querySelectorAll('.saber-controller');
+            // Obtenemos los sables activos sin usar querySelectorAll por rendimiento
+            const sabers = [
+                document.getElementById('leftHand'),
+                document.getElementById('rightHand'),
+                document.getElementById('leftHandTrack'),
+                document.getElementById('rightHandTrack')
+            ].filter(el => el && el.object3D);
+
             if (sabers.length === 0) return;
 
             // 1. Choques con el botón de inicio
             if (!gameActive) {
-                if (this.startTarget && this.startTarget.object3D) {
-                    this.startTarget.object3D.getWorldPosition(this.targetPos);
+                if (this.startTarget) {
+                    const targetPosObj = this.startTarget.getAttribute('position');
+                    if (!targetPosObj) return;
+                    this.targetPos.set(targetPosObj.x, targetPosObj.y, targetPosObj.z);
                     
                     sabers.forEach(saber => {
-                        if (gameActive || !saber.object3D) return;
-                        const obj = saber.object3D;
-                        this.saberStart.set(0, 0, 0); obj.localToWorld(this.saberStart);
-                        this.saberEnd.set(0, 0, -1.0); obj.localToWorld(this.saberEnd);
+                        if (gameActive) return;
+                        
+                        const base = saber.object3D;
+                        const tipEl = saber.querySelector('.saber-tip');
+                        if (!tipEl || !tipEl.object3D) return;
+
+                        base.getWorldPosition(this.saberStart);
+                        tipEl.object3D.getWorldPosition(this.saberEnd);
+
+                        // Seguro anti-congelación (evita vectores vacíos)
+                        if (isNaN(this.saberStart.x) || isNaN(this.saberEnd.x)) return;
+                        if (this.saberStart.distanceTo(this.saberEnd) < 0.1) return; 
+
                         this.saberLine.set(this.saberStart, this.saberEnd);
                         this.saberLine.closestPointToPoint(this.targetPos, true, this.closestPoint);
                         
@@ -102,16 +120,25 @@
             // 2. Choques físicos reales con las preguntas
             const targets = document.querySelectorAll('.target-item');
             targets.forEach(target => {
-                if (target.dataset.hit === "true" || !target.object3D) return;
+                if (target.dataset.hit === "true") return;
                 
-                target.object3D.getWorldPosition(this.targetPos);
+                const targetPosObj = target.getAttribute('position');
+                if (!targetPosObj) return;
+                this.targetPos.set(targetPosObj.x, targetPosObj.y, targetPosObj.z);
                 
                 sabers.forEach(saber => {
-                    if (target.dataset.hit === "true" || this.isTransitioning || !saber.object3D) return;
+                    if (target.dataset.hit === "true" || this.isTransitioning) return;
 
-                    const obj = saber.object3D;
-                    this.saberStart.set(0, 0, 0); obj.localToWorld(this.saberStart);
-                    this.saberEnd.set(0, 0, -1.0); obj.localToWorld(this.saberEnd);
+                    const base = saber.object3D;
+                    const tipEl = saber.querySelector('.saber-tip');
+                    if (!tipEl || !tipEl.object3D) return;
+
+                    base.getWorldPosition(this.saberStart);
+                    tipEl.object3D.getWorldPosition(this.saberEnd);
+
+                    if (isNaN(this.saberStart.x) || isNaN(this.saberEnd.x)) return;
+                    if (this.saberStart.distanceTo(this.saberEnd) < 0.1) return;
+
                     this.saberLine.set(this.saberStart, this.saberEnd);
                     this.saberLine.closestPointToPoint(this.targetPos, true, this.closestPoint);
                     
@@ -162,12 +189,10 @@
           gameActive = true;
           this.isTransitioning = true; 
           
-          if (this.startTarget && this.startTarget.object3D) {
-              // Extracción garantizada de la posición real
-              const pos = new THREE.Vector3();
-              this.startTarget.object3D.getWorldPosition(pos);
-              this.sliceEffect(pos);
-              this.createSparks(pos);
+          if (this.startTarget) {
+              const posObj = this.startTarget.getAttribute('position');
+              this.sliceEffect(posObj);
+              this.createSparks(posObj);
               if (this.startTarget.parentNode) this.startTarget.parentNode.removeChild(this.startTarget);
               this.startTarget = null;
           }
@@ -259,14 +284,7 @@
           this.isTransitioning = true;
           
           const isCorrect = targetEl.dataset.correct === "true";
-          
-          // Posición estable anti-cuelgues
-          const pos = new THREE.Vector3();
-          if (targetEl.object3D) {
-              targetEl.object3D.getWorldPosition(pos);
-          } else {
-              pos.set(0, 1.3, -5); // Seguridad
-          }
+          const pos = targetEl.getAttribute('position');
           
           this.createSparks(hitPoint || pos);
 
@@ -393,6 +411,7 @@
         },
 
         createSparks: function(pos) {
+          if (!pos || pos.x === undefined) return;
           for(let i=0; i<15; i++) {
             const spark = document.createElement('a-sphere');
             spark.setAttribute('radius', '0.018');
@@ -412,6 +431,7 @@
         },
 
         sliceEffect: function(pos) {
+          if (!pos || pos.x === undefined) return;
           const createHalf = (side) => {
             const half = document.createElement('a-cylinder');
             half.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
@@ -455,26 +475,29 @@
 
       <a-entity id="rig">
         <a-camera position="0 1.6 0">
-            <!-- Raycaster de ratón ajustado para permitir probar haciendo click si se prueba en PC -->
             <a-entity cursor="rayOrigin: mouse" raycaster="objects: .start-target, .target-item"></a-entity>
         </a-camera>
         
-        <!-- SABLES FISICOS -->
+        <!-- SABLES FISICOS (Puntos ocultos añadidos en la punta "saber-tip" para físicas precisas) -->
         <a-entity id="leftHand" class="saber-controller" laser-controls="hand: left">
             <a-cylinder class="saber-blade" position="0 0 -0.5" rotation="90 0 0" radius="0.012" height="1.0" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 6"></a-cylinder>
+            <a-entity class="saber-tip" position="0 0 -1.0"></a-entity>
             <a-light type="point" color="#f1c40f" intensity="1.2" distance="3.2"></a-light>
         </a-entity>
         
         <a-entity id="rightHand" class="saber-controller" laser-controls="hand: right">
             <a-cylinder class="saber-blade" position="0 0 -0.5" rotation="90 0 0" radius="0.012" height="1.0" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 6"></a-cylinder>
+            <a-entity class="saber-tip" position="0 0 -1.0"></a-entity>
             <a-light type="point" color="#f1c40f" intensity="1.2" distance="3.2"></a-light>
         </a-entity>
 
-        <a-entity class="saber-controller" hand-tracking-controls="hand: left">
+        <a-entity id="leftHandTrack" class="saber-controller" hand-tracking-controls="hand: left">
              <a-cylinder class="saber-blade" position="0 0 -0.28" rotation="90 0 0" radius="0.008" height="0.56" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 4"></a-cylinder>
+             <a-entity class="saber-tip" position="0 0 -0.56"></a-entity>
         </a-entity>
-        <a-entity class="saber-controller" hand-tracking-controls="hand: right">
+        <a-entity id="rightHandTrack" class="saber-controller" hand-tracking-controls="hand: right">
              <a-cylinder class="saber-blade" position="0 0 -0.28" rotation="90 0 0" radius="0.008" height="0.56" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 4"></a-cylinder>
+             <a-entity class="saber-tip" position="0 0 -0.56"></a-entity>
         </a-entity>
       </a-entity>
 
