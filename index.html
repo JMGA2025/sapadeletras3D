@@ -66,16 +66,13 @@
           this.closestPoint = new THREE.Vector3();
           
           this.startTarget = null;
-          
-          // ESTADO DE SEGURIDAD (Evita que se procesen golpes dobles o superpuestos)
           this.isTransitioning = false; 
 
           this.createStartTarget();
         },
 
-        // MOTOR DE COLISIONES FÍSICAS (Revisado)
+        // MOTOR DE COLISIONES FÍSICAS BLINDADO
         tick: function () {
-            // Si el juego está bloqueado cargando la siguiente pregunta, ignoramos choques
             if (this.isTransitioning) return; 
 
             const sabers = document.querySelectorAll('.saber-controller');
@@ -87,10 +84,10 @@
                     this.startTarget.object3D.getWorldPosition(this.targetPos);
                     
                     sabers.forEach(saber => {
-                        if (gameActive) return;
+                        if (gameActive || !saber.object3D) return;
                         const obj = saber.object3D;
                         this.saberStart.set(0, 0, 0); obj.localToWorld(this.saberStart);
-                        this.saberEnd.set(0, 0, -1.0); obj.localToWorld(this.saberEnd); // Espada de 1.0m
+                        this.saberEnd.set(0, 0, -1.0); obj.localToWorld(this.saberEnd);
                         this.saberLine.set(this.saberStart, this.saberEnd);
                         this.saberLine.closestPointToPoint(this.targetPos, true, this.closestPoint);
                         
@@ -105,12 +102,12 @@
             // 2. Choques físicos reales con las preguntas
             const targets = document.querySelectorAll('.target-item');
             targets.forEach(target => {
-                if (target.dataset.hit === "true") return;
+                if (target.dataset.hit === "true" || !target.object3D) return;
                 
                 target.object3D.getWorldPosition(this.targetPos);
                 
                 sabers.forEach(saber => {
-                    if (target.dataset.hit === "true" || this.isTransitioning) return;
+                    if (target.dataset.hit === "true" || this.isTransitioning || !saber.object3D) return;
 
                     const obj = saber.object3D;
                     this.saberStart.set(0, 0, 0); obj.localToWorld(this.saberStart);
@@ -118,7 +115,6 @@
                     this.saberLine.set(this.saberStart, this.saberEnd);
                     this.saberLine.closestPointToPoint(this.targetPos, true, this.closestPoint);
                     
-                    // Colisión ultraprecisa (Radio 0.36 + Margen)
                     if (this.closestPoint.distanceTo(this.targetPos) < 0.38) { 
                         target.dataset.hit = "true";
                         this.handleHit(target, this.closestPoint.clone());
@@ -138,7 +134,6 @@
                 dir: 'alternate', loop: true, dur: 2000, easing: 'easeInOutSine'
             });
 
-            // Fallback sólo para PC (el raycaster de la cámara está limitado a este objeto)
             target.addEventListener('click', () => { if (!gameActive) this.startGame(); });
             
             const body = document.createElement('a-cylinder');
@@ -165,10 +160,12 @@
         startGame: function() {
           if (gameActive) return;
           gameActive = true;
-          this.isTransitioning = true; // Bloquea todo hasta que salga el primer disco
+          this.isTransitioning = true; 
           
-          if (this.startTarget) {
-              const pos = this.startTarget.getAttribute('position');
+          if (this.startTarget && this.startTarget.object3D) {
+              // Extracción garantizada de la posición real
+              const pos = new THREE.Vector3();
+              this.startTarget.object3D.getWorldPosition(pos);
               this.sliceEffect(pos);
               this.createSparks(pos);
               if (this.startTarget.parentNode) this.startTarget.parentNode.removeChild(this.startTarget);
@@ -215,6 +212,13 @@
           target.setAttribute('position', `${xPos} 1.3 -22`);
           target.dataset.correct = isCorrect;
           
+          target.addEventListener('click', () => {
+              if (gameActive && target.dataset.hit !== "true") {
+                  target.dataset.hit = "true";
+                  this.handleHit(target, null);
+              }
+          });
+          
           const body = document.createElement('a-cylinder');
           body.setAttribute('rotation', '90 0 0');
           body.setAttribute('radius', '0.36'); 
@@ -240,10 +244,8 @@
 
           this.el.appendChild(target);
 
-          // Si el disco se pasa de largo (Fuera de tiempo)
           setTimeout(() => {
             if (target.parentNode && target.dataset.hit !== "true") {
-              // Comprobamos que es la respuesta correcta y que el juego no ha transicionado ya
               if (isCorrect && gameActive && !this.isTransitioning && this.pizarra.getAttribute('value') === currentChallenge.q) {
                 this.handleMiss();
               }
@@ -253,11 +255,18 @@
         },
 
         handleHit: function(targetEl, hitPoint) {
-          if (this.isTransitioning) return; // BLOQUEO: Previene impactos dobles de la espada
+          if (this.isTransitioning) return; 
           this.isTransitioning = true;
           
           const isCorrect = targetEl.dataset.correct === "true";
-          const pos = targetEl.getAttribute('position');
+          
+          // Posición estable anti-cuelgues
+          const pos = new THREE.Vector3();
+          if (targetEl.object3D) {
+              targetEl.object3D.getWorldPosition(pos);
+          } else {
+              pos.set(0, 1.3, -5); // Seguridad
+          }
           
           this.createSparks(hitPoint || pos);
 
@@ -271,7 +280,7 @@
             this.pizarra.setAttribute('color', '#2ecc71');
             this.sliceEffect(pos);
             
-            this.cleanupTargets(); // Limpia toda la pantalla
+            this.cleanupTargets(); 
             
             if (questionsAnswered >= DESAFIOS.length) {
                 this.victory();
@@ -293,7 +302,7 @@
             if (lives <= 0) { 
                 this.gameOver(); 
             } else { 
-                this.cleanupTargets(targetEl); // Borra todo menos el que se está animando a rojo
+                this.cleanupTargets(targetEl); 
                 setTimeout(() => {
                     if (targetEl.parentNode) targetEl.parentNode.removeChild(targetEl);
                     this.isTransitioning = false;
@@ -421,7 +430,6 @@
           createHalf('left'); createHalf('right');
         },
 
-        // Permite excluir un elemento de la limpieza para que se pueda ver su animación de error
         cleanupTargets: function(excludeEl = null) {
           document.querySelectorAll('.target-item').forEach(t => { 
               if (t !== excludeEl && t.parentNode) t.parentNode.removeChild(t); 
@@ -447,11 +455,11 @@
 
       <a-entity id="rig">
         <a-camera position="0 1.6 0">
-            <!-- Raycaster limitado SÓLO al disco de inicio, las preguntas NO se cortan apuntando -->
-            <a-entity cursor="rayOrigin: mouse" raycaster="objects: .start-target"></a-entity>
+            <!-- Raycaster de ratón ajustado para permitir probar haciendo click si se prueba en PC -->
+            <a-entity cursor="rayOrigin: mouse" raycaster="objects: .start-target, .target-item"></a-entity>
         </a-camera>
         
-        <!-- SABLES FISICOS REALES (Longitud 1.0m) -->
+        <!-- SABLES FISICOS -->
         <a-entity id="leftHand" class="saber-controller" laser-controls="hand: left">
             <a-cylinder class="saber-blade" position="0 0 -0.5" rotation="90 0 0" radius="0.012" height="1.0" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 6"></a-cylinder>
             <a-light type="point" color="#f1c40f" intensity="1.2" distance="3.2"></a-light>
@@ -462,7 +470,6 @@
             <a-light type="point" color="#f1c40f" intensity="1.2" distance="3.2"></a-light>
         </a-entity>
 
-        <!-- TRACKING DE MANOS -->
         <a-entity class="saber-controller" hand-tracking-controls="hand: left">
              <a-cylinder class="saber-blade" position="0 0 -0.28" rotation="90 0 0" radius="0.008" height="0.56" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 4"></a-cylinder>
         </a-entity>
@@ -471,7 +478,7 @@
         </a-entity>
       </a-entity>
 
-      <!-- TERMINAL DE CONTROL (ALEJADO A -5.0 METROS Y REDUCIDO AL 80%) -->
+      <!-- TERMINAL DE CONTROL (HUD A -5.0 METROS) -->
       <a-entity position="0 2.2 -5.0" scale="0.8 0.8 0.8">
         <a-plane color="#000000" width="6.5" height="2.8" opacity="0.95" material="metalness: 0.5"></a-plane>
         <a-ring color="#f1c40f" radius-inner="3.3" radius-outer="3.4" position="0 0 -0.01" opacity="0.1"></a-ring>
