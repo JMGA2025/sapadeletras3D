@@ -7,7 +7,7 @@
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     
     <script>
-      // BASE DE DATOS TÉCNICA (26 Preguntas con Ortografía de precisión)
+      // BASE DE DATOS TÉCNICA (26 Preguntas)
       const DESAFIOS = [
         { q: "SMAW", a: "111", bad: "141" },
         { q: "E6013", a: "Rutilo", bad: "Básico" },
@@ -49,7 +49,7 @@
       const SPEED_STEP = 250;     
       let currentDuration = BASE_DURATION;
 
-      // Usamos la fuente 'dejavu' que es nativa y soporta acentos perfectamente
+      // Fuente nativa de A-Frame para asegurar acentos perfectos
       const FONT_ESTABLE = "dejavu";
 
       AFRAME.registerComponent('game-engine', {
@@ -59,56 +59,62 @@
           this.comboText = document.querySelector('#combo-text');
           this.livesText = document.querySelector('#lives-text');
           this.progressBar = document.querySelector('#progress-bar-fill');
-          this.startBtn = document.querySelector('#start-btn');
+          this.saberBlades = document.querySelectorAll('.saber-blade');
           
-          // Variables matemáticas para colisiones reales de espada
+          // Variables matemáticas para colisiones físicas de la espada
           this.saberStart = new THREE.Vector3();
           this.saberEnd = new THREE.Vector3();
           this.targetPos = new THREE.Vector3();
           this.saberLine = new THREE.Line3();
           this.closestPoint = new THREE.Vector3();
           
-          // Iniciar partida con el botón
-          this.startBtn.addEventListener('click', () => { if (!gameActive) this.startGame(); });
+          this.startTarget = null;
+          this.createStartTarget();
         },
 
-        // TICK FUNCIONA COMO MOTOR DE FÍSICAS (Se ejecuta en cada frame)
+        // EL MOTOR DE COLISIONES FÍSICAS (Se ejecuta constantemente)
         tick: function () {
-            if (!gameActive) return;
-
             const sabers = document.querySelectorAll('.saber-controller');
-            const targets = document.querySelectorAll('.target-item');
-            
-            if (sabers.length === 0 || targets.length === 0) return;
+            if (sabers.length === 0) return;
 
+            // 1. Si el juego no ha empezado, comprobamos si cortamos el botón de inicio
+            if (!gameActive) {
+                if (this.startTarget && this.startTarget.object3D) {
+                    this.startTarget.object3D.getWorldPosition(this.targetPos);
+                    
+                    sabers.forEach(saber => {
+                        if (gameActive) return; // Evitar dobles activaciones
+                        const obj = saber.object3D;
+                        this.saberStart.set(0, 0, 0); obj.localToWorld(this.saberStart);
+                        this.saberEnd.set(0, 0, -1.2); obj.localToWorld(this.saberEnd); // Largo del sable
+                        this.saberLine.set(this.saberStart, this.saberEnd);
+                        this.saberLine.closestPointToPoint(this.targetPos, true, this.closestPoint);
+                        
+                        if (this.closestPoint.distanceTo(this.targetPos) < 0.40) {
+                            this.startGame();
+                        }
+                    });
+                }
+                return;
+            }
+
+            // 2. Si el juego está activo, comprobamos los discos
+            const targets = document.querySelectorAll('.target-item');
             targets.forEach(target => {
                 if (target.dataset.hit === "true") return;
                 
-                // Posición central del disco
                 target.object3D.getWorldPosition(this.targetPos);
                 
                 sabers.forEach(saber => {
                     if (target.dataset.hit === "true") return;
 
                     const obj = saber.object3D;
-                    
-                    // Calculamos la base y la punta de la espada física
-                    this.saberStart.set(0, 0, 0); 
-                    obj.localToWorld(this.saberStart);
-                    
-                    // La espada mide 1.3 metros hacia adelante
-                    this.saberEnd.set(0, 0, -1.3); 
-                    obj.localToWorld(this.saberEnd);
-                    
-                    // Creamos un segmento de línea exacto donde está la espada
+                    this.saberStart.set(0, 0, 0); obj.localToWorld(this.saberStart);
+                    this.saberEnd.set(0, 0, -1.2); obj.localToWorld(this.saberEnd);
                     this.saberLine.set(this.saberStart, this.saberEnd);
-                    
-                    // Encontramos el punto de la espada que esté más cerca del disco
                     this.saberLine.closestPointToPoint(this.targetPos, true, this.closestPoint);
-                    const dist = this.closestPoint.distanceTo(this.targetPos);
                     
-                    // Si ese punto atraviesa el radio del disco (0.36) + un margen, cortamos!
-                    if (dist < 0.40) { 
+                    if (this.closestPoint.distanceTo(this.targetPos) < 0.40) { 
                         target.dataset.hit = "true";
                         this.handleHit(target, this.closestPoint.clone());
                     }
@@ -116,8 +122,54 @@
             });
         },
 
+        createStartTarget: function() {
+            if (this.startTarget) return;
+            const target = document.createElement('a-entity');
+            target.setAttribute('class', 'start-target'); 
+            target.setAttribute('position', '0 1.3 -1.5'); // Justo delante del alumno
+            
+            // Animación de flotación suave
+            target.setAttribute('animation', {
+                property: 'position', to: '0 1.4 -1.5',
+                dir: 'alternate', loop: true, dur: 2000, easing: 'easeInOutSine'
+            });
+
+            // Permitir clic con ratón para pruebas en PC
+            target.addEventListener('click', () => { if (!gameActive) this.startGame(); });
+            
+            const body = document.createElement('a-cylinder');
+            body.setAttribute('rotation', '90 0 0');
+            body.setAttribute('radius', '0.36');
+            body.setAttribute('height', '0.032');
+            body.setAttribute('material', 'color: #111111; metalness: 0.9; roughness: 0.1; emissive: #27ae60; emissiveIntensity: 0.3');
+            
+            const text = document.createElement('a-text');
+            text.setAttribute('value', 'CORTAR\nINICIAR');
+            text.setAttribute('align', 'center');
+            text.setAttribute('width', '4');
+            text.setAttribute('position', '0 0 0.025');
+            text.setAttribute('color', '#2ecc71');
+            text.setAttribute('font', FONT_ESTABLE);
+            text.setAttribute('material', 'shader: flat; emissive: #2ecc71; emissiveIntensity: 0.6');
+
+            target.appendChild(body);
+            target.appendChild(text);
+            this.el.appendChild(target);
+            this.startTarget = target;
+        },
+
         startGame: function() {
           gameActive = true;
+          
+          // Efecto visual al destruir el botón de inicio
+          if (this.startTarget) {
+              const pos = this.startTarget.getAttribute('position');
+              this.sliceEffect(pos);
+              this.createSparks(pos);
+              this.startTarget.parentNode.removeChild(this.startTarget);
+              this.startTarget = null;
+          }
+
           score = 0;
           combo = 0;
           lives = 3;
@@ -125,9 +177,8 @@
           currentDuration = BASE_DURATION;
           this.updateUI();
           this.setSaberColor('#f1c40f', 5);
-          this.startBtn.setAttribute('visible', 'false');
-          this.startBtn.setAttribute('scale', '0 0 0');
-          this.nextChallenge();
+          
+          setTimeout(() => this.nextChallenge(), 1000);
         },
 
         nextChallenge: function() {
@@ -145,7 +196,6 @@
 
         spawnTargets: function() {
           const isCorrectLeft = Math.random() > 0.5;
-          // Separación ajustada para el tamaño reducido
           this.createTarget(currentChallenge.a, isCorrectLeft ? -1.04 : 1.04, true);
           this.createTarget(currentChallenge.bad, isCorrectLeft ? 1.04 : -1.04, false);
         },
@@ -156,7 +206,7 @@
           target.setAttribute('position', `${xPos} 1.3 -22`);
           target.dataset.correct = isCorrect;
           
-          // Evento fallback para poder hacer "Click" con el ratón si se prueba en PC
+          // Fallback para PC
           target.addEventListener('click', () => {
               if (gameActive && target.dataset.hit !== "true") {
                   target.dataset.hit = "true";
@@ -166,14 +216,14 @@
           
           const body = document.createElement('a-cylinder');
           body.setAttribute('rotation', '90 0 0');
-          body.setAttribute('radius', '0.36'); // Reducido 20%
-          body.setAttribute('height', '0.032'); // Reducido 20%
+          body.setAttribute('radius', '0.36'); 
+          body.setAttribute('height', '0.032'); 
           body.setAttribute('material', 'color: #111111; metalness: 0.9; roughness: 0.1; emissive: #f1c40f; emissiveIntensity: 0.05');
           
           const text = document.createElement('a-text');
           text.setAttribute('value', label);
           text.setAttribute('align', 'center');
-          text.setAttribute('width', '4.4'); // Reducido 20%
+          text.setAttribute('width', '4.4'); 
           text.setAttribute('position', '0 0 0.025');
           text.setAttribute('color', '#f1c40f');
           text.setAttribute('font', FONT_ESTABLE);
@@ -189,7 +239,6 @@
 
           this.el.appendChild(target);
 
-          // Si el disco pasa de largo y no se cortó...
           setTimeout(() => {
             if (target.parentNode && target.dataset.hit !== "true") {
               target.parentNode.removeChild(target);
@@ -204,7 +253,6 @@
           const isCorrect = targetEl.dataset.correct === "true";
           const pos = targetEl.getAttribute('position');
           
-          // Lanzar chispas en el punto de impacto exacto
           this.createSparks(hitPoint || pos);
 
           if (isCorrect) {
@@ -275,9 +323,7 @@
             this.cleanupTargets();
             this.pizarra.setAttribute('value', '¡MISIÓN CUMPLIDA - MAESTRO SMAW!');
             this.pizarra.setAttribute('color', '#2ecc71');
-            this.startBtn.setAttribute('visible', 'true');
-            this.startBtn.setAttribute('scale', '1 1 1');
-            this.startBtn.querySelector('a-text').setAttribute('value', 'NUEVA PARTIDA');
+            setTimeout(() => this.createStartTarget(), 2000);
         },
 
         gameOver: function() {
@@ -285,9 +331,11 @@
             this.cleanupTargets();
             this.pizarra.setAttribute('value', 'FALLO CRÍTICO - SISTEMA COLAPSADO');
             this.pizarra.setAttribute('color', '#ff0000');
-            this.startBtn.setAttribute('visible', 'true');
-            this.startBtn.setAttribute('scale', '1 1 1');
-            this.startBtn.querySelector('a-text').setAttribute('value', 'REINTENTAR');
+            setTimeout(() => {
+                this.createStartTarget();
+                this.pizarra.setAttribute('value', 'CORTA EL DISCO VERDE PARA REINTENTAR');
+                this.pizarra.setAttribute('color', '#FFFFFF');
+            }, 2000);
         },
 
         increaseSpeed: function() {
@@ -305,7 +353,6 @@
         updateUI: function() {
             this.scoreText.setAttribute('value', `PUNTOS: ${score}`);
             this.comboText.setAttribute('value', `RACHA: ${combo}`);
-            // Solución para compatibilidad de fuentes (Texto normal en vez de Emojis)
             this.livesText.setAttribute('value', `VIDAS: ${lives} / 3`);
             this.livesText.setAttribute('color', lives === 1 ? '#ff0000' : '#FFFFFF');
             
@@ -338,7 +385,7 @@
             const half = document.createElement('a-cylinder');
             half.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
             half.setAttribute('rotation', '90 0 0');
-            half.setAttribute('radius', '0.36'); // Reducido
+            half.setAttribute('radius', '0.36'); 
             half.setAttribute('height', '0.016');
             half.setAttribute('theta-length', '180');
             half.setAttribute('theta-start', side === 'left' ? '0' : '180');
@@ -365,9 +412,7 @@
     <a-scene 
       game-engine
       renderer="alpha: true; antialias: true; colorManagement: true; highRefreshRate: true"
-      webxr="optionalFeatures: hit-test, local-floor, passthrough;"
-      cursor="rayOrigin: mouse"
-      raycaster="objects: #start-btn, .target-item">
+      webxr="optionalFeatures: hit-test, local-floor, passthrough;">
       
       <a-sky visible="false"></a-sky>
       <a-light type="ambient" intensity="0.9"></a-light>
@@ -376,29 +421,32 @@
       <a-grid position="0 0 0" rotation="-90 0 0" width="30" height="60" material="color: #f1c40f; opacity: 0.08; transparent: true"></a-grid>
 
       <a-entity id="rig">
-        <a-camera position="0 1.6 0"><a-cursor visible="false"></a-cursor></a-camera>
+        <a-camera position="0 1.6 0">
+            <!-- Cursor para pruebas en ordenador -->
+            <a-entity cursor="rayOrigin: mouse" raycaster="objects: .start-target, .target-item"></a-entity>
+        </a-camera>
         
-        <!-- SABLES FISICOS - Añadimos class="saber-controller" y limitamos raycaster al botón -->
-        <a-entity id="leftHand" class="saber-controller" laser-controls="hand: left" raycaster="objects: #start-btn; far: 10; showLine: false; interval: 20">
+        <!-- SABLES FISICOS REALES (Sin raycaster) -->
+        <a-entity id="leftHand" class="saber-controller" laser-controls="hand: left">
             <a-cylinder class="saber-blade" position="0 0 -0.6" rotation="90 0 0" radius="0.012" height="1.2" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 6"></a-cylinder>
             <a-light type="point" color="#f1c40f" intensity="1.2" distance="3.2"></a-light>
         </a-entity>
         
-        <a-entity id="rightHand" class="saber-controller" laser-controls="hand: right" raycaster="objects: #start-btn; far: 10; showLine: false; interval: 20">
+        <a-entity id="rightHand" class="saber-controller" laser-controls="hand: right">
             <a-cylinder class="saber-blade" position="0 0 -0.6" rotation="90 0 0" radius="0.012" height="1.2" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 6"></a-cylinder>
             <a-light type="point" color="#f1c40f" intensity="1.2" distance="3.2"></a-light>
         </a-entity>
 
         <!-- TRACKING DE MANOS -->
-        <a-entity class="saber-controller" hand-tracking-controls="hand: left" raycaster="objects: #start-btn; far: 10; interval: 20">
+        <a-entity class="saber-controller" hand-tracking-controls="hand: left">
              <a-cylinder class="saber-blade" position="0 0 -0.28" rotation="90 0 0" radius="0.008" height="0.56" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 4"></a-cylinder>
         </a-entity>
-        <a-entity class="saber-controller" hand-tracking-controls="hand: right" raycaster="objects: #start-btn; far: 10; interval: 20">
+        <a-entity class="saber-controller" hand-tracking-controls="hand: right">
              <a-cylinder class="saber-blade" position="0 0 -0.28" rotation="90 0 0" radius="0.008" height="0.56" material="color: #f1c40f; emissive: #f1c40f; emissiveIntensity: 4"></a-cylinder>
         </a-entity>
       </a-entity>
 
-      <!-- TERMINAL DE CONTROL (ALEJADO A -4.5 Y REDUCIDO AL 80%) -->
+      <!-- TERMINAL DE CONTROL -->
       <a-entity position="0 2.2 -4.5" scale="0.8 0.8 0.8">
         <a-plane color="#000000" width="6.5" height="2.8" opacity="0.95" material="metalness: 0.5"></a-plane>
         <a-ring color="#f1c40f" radius-inner="3.3" radius-outer="3.4" position="0 0 -0.01" opacity="0.1"></a-ring>
@@ -410,18 +458,12 @@
             <a-plane id="progress-bar-fill" color="#2ecc71" width="0" height="0.1" position="-2.5 0 0.01" material="emissive: #2ecc71; emissiveIntensity: 0.5"></a-plane>
         </a-entity>
         
-        <a-text id="hint-text" value="APUNTA Y PULSA GATILLO" align="center" position="0 0.35 0.05" width="7" color="#2ecc71" font="dejavu"></a-text>
+        <a-text id="hint-text" value="SISTEMA LISTO PARA INICIAR" align="center" position="0 0.35 0.05" width="7" color="#2ecc71" font="dejavu"></a-text>
         
-        <!-- Texto claro de vidas -->
         <a-text id="lives-text" value="VIDAS: 3 / 3" align="center" position="0 -0.25 0.05" width="5.5" font="dejavu"></a-text>
         
         <a-text id="score-text" value="PUNTOS: 0" align="center" position="-1.8 -0.8 0.05" width="4.5" color="#f1c40f" font="dejavu"></a-text>
         <a-text id="combo-text" value="RACHA: 0" align="center" position="1.8 -0.8 0.05" width="4.5" color="#f1c40f" font="dejavu"></a-text>
-
-        <!-- BOTÓN DE INICIO PARA APUNTAR CON LÁSER -->
-        <a-entity id="start-btn" position="0 -1.6 0.2" class="interactuable" geometry="primitive: plane; width: 2.8; height: 0.7" material="color: #27ae60; emissive: #27ae60; emissiveIntensity: 0.5">
-          <a-text value="PULSA GATILLO AQUI" align="center" position="0 0 0.02" width="6.5" color="#FFFFFF" font="dejavu"></a-text>
-        </a-entity>
       </a-entity>
 
     </a-scene>
